@@ -13,10 +13,10 @@
             background: #000;
             font-family: 'Georgia', serif;
         }
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
+        #mainCanvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
         }
         #startOverlay {
             position: fixed;
@@ -28,38 +28,201 @@
             align-items: center;
             justify-content: center;
             z-index: 100;
-            cursor: pointer;
-            transition: opacity 0.8s ease;
+            transition: opacity 1s ease;
         }
-        #startOverlay.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
+        #startOverlay.hidden { opacity: 0; pointer-events: none; }
         #startOverlay h1 {
             color: #f4c430;
-            font-size: 3rem;
-            text-shadow: 0 0 30px rgba(244, 196, 48, 0.6), 0 0 60px rgba(244, 196, 48, 0.3);
-            margin-bottom: 1rem;
+            font-size: clamp(1.8rem, 5vw, 3.5rem);
+            text-shadow: 0 0 30px rgba(244,196,48,0.6), 0 0 60px rgba(244,196,48,0.3);
+            margin-bottom: 2rem;
             letter-spacing: 0.1em;
         }
-        #startOverlay p {
-            color: #c49430;
-            font-size: 1.2rem;
-            opacity: 0.8;
+        .source-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+        .source-btn {
+            background: linear-gradient(135deg, rgba(212,175,55,0.25), rgba(180,130,30,0.15));
+            border: 1px solid rgba(244,196,48,0.4);
+            color: #f4c430;
+            padding: 0.9rem 1.6rem;
+            font-family: 'Georgia', serif;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            min-width: 180px;
+        }
+        .source-btn:hover {
+            background: linear-gradient(135deg, rgba(212,175,55,0.45), rgba(180,130,30,0.3));
+            border-color: rgba(244,196,48,0.8);
+            box-shadow: 0 0 20px rgba(244,196,48,0.3);
+        }
+        .source-btn .icon { font-size: 1.4rem; display: block; margin-bottom: 0.3rem; }
+        .source-btn .label { font-size: 0.85rem; opacity: 0.7; display: block; }
+        #youtubeInput {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.8rem;
+            margin-top: 1rem;
+        }
+        #youtubeInput.visible { display: flex; }
+        #ytUrl {
+            background: rgba(20,10,0,0.8);
+            border: 1px solid rgba(244,196,48,0.4);
+            color: #f4c430;
+            padding: 0.7rem 1rem;
+            font-family: 'Georgia', serif;
+            font-size: 1rem;
+            border-radius: 6px;
+            width: 350px;
+            max-width: 80vw;
+            outline: none;
+        }
+        #ytUrl::placeholder { color: rgba(244,196,48,0.4); }
+        #ytUrl:focus { border-color: rgba(244,196,48,0.8); }
+        #ytGo {
+            background: rgba(212,175,55,0.3);
+            border: 1px solid rgba(244,196,48,0.5);
+            color: #f4c430;
+            padding: 0.5rem 2rem;
+            font-family: 'Georgia', serif;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        #ytGo:hover { background: rgba(212,175,55,0.5); }
+        .sub-text { color: #c49430; font-size: 0.9rem; opacity: 0.6; margin-top: 1.5rem; }
+        #ytPlayer {
+            position: fixed;
+            bottom: 12px;
+            right: 12px;
+            z-index: 50;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            display: none;
+            border: 1px solid rgba(244,196,48,0.3);
+        }
+        #ytPlayer.visible { display: block; }
+        #sourceLabel {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            color: rgba(244,196,48,0.5);
+            font-size: 0.75rem;
+            z-index: 50;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
     <div id="startOverlay">
         <h1>Menorah Flame Visualizer</h1>
-        <p>Click anywhere to begin</p>
+        <div class="source-buttons">
+            <button class="source-btn" id="btnMic">
+                <span class="icon">&#127908;</span>
+                Microphone
+                <span class="label">React to voice / room audio</span>
+            </button>
+            <button class="source-btn" id="btnSystem">
+                <span class="icon">&#128266;</span>
+                System Audio
+                <span class="label">Capture any tab or app</span>
+            </button>
+            <button class="source-btn" id="btnYoutube">
+                <span class="icon">&#9654;</span>
+                YouTube Link
+                <span class="label">Paste a video URL</span>
+            </button>
+        </div>
+        <div id="youtubeInput">
+            <input type="text" id="ytUrl" placeholder="https://www.youtube.com/watch?v=..." />
+            <button id="ytGo">Visualize</button>
+        </div>
+        <p class="sub-text">Select an audio source to begin</p>
     </div>
-    <canvas id="canvas"></canvas>
+    <canvas id="mainCanvas"></canvas>
+    <div id="ytPlayer"></div>
+    <div id="sourceLabel"></div>
+
     <script>
     (function() {
         'use strict';
 
-        const canvas = document.getElementById('canvas');
+        // ==================== SIMPLEX NOISE ====================
+        // Compact 2D/3D simplex noise implementation
+        const SimplexNoise = (function() {
+            const F2 = 0.5 * (Math.sqrt(3) - 1);
+            const G2 = (3 - Math.sqrt(3)) / 6;
+            const F3 = 1 / 3;
+            const G3 = 1 / 6;
+            const grad3 = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+            const perm = new Uint8Array(512);
+            const permMod12 = new Uint8Array(512);
+            const p = new Uint8Array(256);
+            for (let i = 0; i < 256; i++) p[i] = i;
+            for (let i = 255; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [p[i], p[j]] = [p[j], p[i]];
+            }
+            for (let i = 0; i < 512; i++) { perm[i] = p[i & 255]; permMod12[i] = perm[i] % 12; }
+
+            function dot2(g, x, y) { return g[0]*x + g[1]*y; }
+            function dot3(g, x, y, z) { return g[0]*x + g[1]*y + g[2]*z; }
+
+            return {
+                noise2D(x, y) {
+                    const s = (x + y) * F2;
+                    const i = Math.floor(x + s), j = Math.floor(y + s);
+                    const t = (i + j) * G2;
+                    const x0 = x - (i - t), y0 = y - (j - t);
+                    const i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
+                    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+                    const x2 = x0 - 1 + 2*G2, y2 = y0 - 1 + 2*G2;
+                    const ii = i & 255, jj = j & 255;
+                    let n0 = 0, n1 = 0, n2 = 0;
+                    let t0 = 0.5 - x0*x0 - y0*y0;
+                    if (t0 >= 0) { t0 *= t0; n0 = t0*t0 * dot2(grad3[permMod12[ii+perm[jj]]], x0, y0); }
+                    let t1 = 0.5 - x1*x1 - y1*y1;
+                    if (t1 >= 0) { t1 *= t1; n1 = t1*t1 * dot2(grad3[permMod12[ii+i1+perm[jj+j1]]], x1, y1); }
+                    let t2 = 0.5 - x2*x2 - y2*y2;
+                    if (t2 >= 0) { t2 *= t2; n2 = t2*t2 * dot2(grad3[permMod12[ii+1+perm[jj+1]]], x2, y2); }
+                    return 70 * (n0 + n1 + n2);
+                },
+                noise3D(x, y, z) {
+                    const s = (x + y + z) * F3;
+                    const i = Math.floor(x + s), j = Math.floor(y + s), k = Math.floor(z + s);
+                    const t = (i + j + k) * G3;
+                    const x0 = x-(i-t), y0 = y-(j-t), z0 = z-(k-t);
+                    let i1,j1,k1,i2,j2,k2;
+                    if (x0>=y0) { if (y0>=z0) {i1=1;j1=0;k1=0;i2=1;j2=1;k2=0;} else if (x0>=z0) {i1=1;j1=0;k1=0;i2=1;j2=0;k2=1;} else {i1=0;j1=0;k1=1;i2=1;j2=0;k2=1;} }
+                    else { if (y0<z0) {i1=0;j1=0;k1=1;i2=0;j2=1;k2=1;} else if (x0<z0) {i1=0;j1=1;k1=0;i2=0;j2=1;k2=1;} else {i1=0;j1=1;k1=0;i2=1;j2=1;k2=0;} }
+                    const x1=x0-i1+G3, y1=y0-j1+G3, z1=z0-k1+G3;
+                    const x2=x0-i2+2*G3, y2=y0-j2+2*G3, z2=z0-k2+2*G3;
+                    const x3=x0-1+3*G3, y3=y0-1+3*G3, z3=z0-1+3*G3;
+                    const ii=i&255, jj=j&255, kk=k&255;
+                    let n0=0,n1=0,n2=0,n3=0;
+                    let t0=0.6-x0*x0-y0*y0-z0*z0;
+                    if(t0>=0){t0*=t0;n0=t0*t0*dot3(grad3[permMod12[ii+perm[jj+perm[kk]]]],x0,y0,z0);}
+                    let t1=0.6-x1*x1-y1*y1-z1*z1;
+                    if(t1>=0){t1*=t1;n1=t1*t1*dot3(grad3[permMod12[ii+i1+perm[jj+j1+perm[kk+k1]]]],x1,y1,z1);}
+                    let t2=0.6-x2*x2-y2*y2-z2*z2;
+                    if(t2>=0){t2*=t2;n2=t2*t2*dot3(grad3[permMod12[ii+i2+perm[jj+j2+perm[kk+k2]]]],x2,y2,z2);}
+                    let t3=0.6-x3*x3-y3*y3-z3*z3;
+                    if(t3>=0){t3*=t3;n3=t3*t3*dot3(grad3[permMod12[ii+1+perm[jj+1+perm[kk+1]]]],x3,y3,z3);}
+                    return 32*(n0+n1+n2+n3);
+                }
+            };
+        })();
+
+        // ==================== CANVAS SETUP ====================
+        const canvas = document.getElementById('mainCanvas');
         const ctx = canvas.getContext('2d');
         const overlay = document.getElementById('startOverlay');
 
@@ -67,7 +230,11 @@
         let audioCtx, analyser, dataArray, freqData;
         let audioReady = false;
         let time = 0;
+        let lastTime = performance.now();
         const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+        // Offscreen canvas for heat distortion
+        let offCanvas, offCtx;
 
         function resize() {
             W = window.innerWidth;
@@ -75,108 +242,168 @@
             canvas.width = W * DPR;
             canvas.height = H * DPR;
             ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+            offCanvas = document.createElement('canvas');
+            offCanvas.width = canvas.width;
+            offCanvas.height = canvas.height;
+            offCtx = offCanvas.getContext('2d');
         }
         window.addEventListener('resize', resize);
         resize();
 
-        // Audio setup
-        async function initAudio() {
-            try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 512;
-                analyser.smoothingTimeConstant = 0.8;
-                const bufLen = analyser.frequencyBinCount;
-                dataArray = new Uint8Array(bufLen);
-                freqData = new Uint8Array(bufLen);
+        // ==================== AUDIO SETUP ====================
+        function createAnalyser() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 1024;
+            analyser.smoothingTimeConstant = 0.82;
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            freqData = new Uint8Array(analyser.frequencyBinCount);
+        }
 
+        async function initMicrophone() {
+            try {
+                createAnalyser();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const source = audioCtx.createMediaStreamSource(stream);
-                source.connect(analyser);
+                audioCtx.createMediaStreamSource(stream).connect(analyser);
                 audioReady = true;
+                setSourceLabel('Microphone');
             } catch (e) {
-                console.warn('Audio not available, running in ambient mode.', e);
-                audioReady = false;
+                console.warn('Mic not available:', e);
+                setSourceLabel('Ambient (no mic)');
             }
         }
 
+        async function initSystemAudio() {
+            try {
+                createAnalyser();
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true,
+                    audio: true
+                });
+                // Stop video tracks, we only need audio
+                stream.getVideoTracks().forEach(t => t.stop());
+                const audioTracks = stream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    setSourceLabel('No audio track selected - ambient mode');
+                    return;
+                }
+                const audioStream = new MediaStream(audioTracks);
+                audioCtx.createMediaStreamSource(audioStream).connect(analyser);
+                audioReady = true;
+                setSourceLabel('System Audio');
+            } catch (e) {
+                console.warn('System audio not available:', e);
+                setSourceLabel('Ambient (capture denied)');
+            }
+        }
+
+        function extractYouTubeId(url) {
+            const patterns = [
+                /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
+                /^([a-zA-Z0-9_-]{11})$/
+            ];
+            for (const p of patterns) {
+                const m = url.match(p);
+                if (m) return m[1];
+            }
+            return null;
+        }
+
+        function initYouTube(url) {
+            const videoId = extractYouTubeId(url);
+            if (!videoId) {
+                alert('Invalid YouTube URL. Please use a standard YouTube link.');
+                return false;
+            }
+
+            const playerDiv = document.getElementById('ytPlayer');
+            const iframe = document.createElement('iframe');
+            iframe.width = '320';
+            iframe.height = '180';
+            iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=1&enablejsapi=1`;
+            iframe.allow = 'autoplay; encrypted-media';
+            iframe.allowFullscreen = true;
+            playerDiv.innerHTML = '';
+            playerDiv.appendChild(iframe);
+            playerDiv.classList.add('visible');
+
+            setSourceLabel('YouTube - use System Audio to capture sound');
+            return true;
+        }
+
+        function setSourceLabel(text) {
+            document.getElementById('sourceLabel').textContent = text;
+        }
+
+        // Smoothed audio levels
+        let smoothBass = 0, smoothMid = 0, smoothHigh = 0, smoothOverall = 0;
+
         function getAudioLevel() {
-            if (!audioReady) return { bass: 0.3, mid: 0.3, high: 0.3, overall: 0.3 };
+            const ambient = { bass: 0.15, mid: 0.1, high: 0.08, overall: 0.12 };
+            if (!audioReady) return ambient;
+
             analyser.getByteFrequencyData(freqData);
             analyser.getByteTimeDomainData(dataArray);
 
             const len = freqData.length;
             let bass = 0, mid = 0, high = 0;
-            const bassEnd = Math.floor(len * 0.15);
-            const midEnd = Math.floor(len * 0.5);
+            const bassEnd = Math.floor(len * 0.12);
+            const midEnd = Math.floor(len * 0.45);
 
             for (let i = 0; i < bassEnd; i++) bass += freqData[i];
             for (let i = bassEnd; i < midEnd; i++) mid += freqData[i];
             for (let i = midEnd; i < len; i++) high += freqData[i];
 
-            bass = bass / (bassEnd * 255);
-            mid = mid / ((midEnd - bassEnd) * 255);
-            high = high / ((len - midEnd) * 255);
-            const overall = (bass * 0.5 + mid * 0.3 + high * 0.2);
+            bass /= (bassEnd * 255);
+            mid /= ((midEnd - bassEnd) * 255);
+            high /= ((len - midEnd) * 255);
+            const overall = bass * 0.5 + mid * 0.3 + high * 0.2;
 
-            return { bass, mid, high, overall };
+            // Smooth for natural motion
+            const sm = 0.15;
+            smoothBass += (bass - smoothBass) * sm;
+            smoothMid += (mid - smoothMid) * sm;
+            smoothHigh += (high - smoothHigh) * sm;
+            smoothOverall += (overall - smoothOverall) * sm;
+
+            return { bass: smoothBass, mid: smoothMid, high: smoothHigh, overall: smoothOverall };
         }
 
-        // Menorah geometry
-        const BRANCHES = 9;
-
-        function getMenorahPoints() {
-            const baseY = H * 0.88;
-            const centerX = W / 2;
-            const spread = Math.min(W * 0.38, H * 0.45);
-            const topY = H * 0.22;
-            const shamashY = H * 0.17;
-
-            const points = [];
-            for (let i = 0; i < BRANCHES; i++) {
-                const idx = i - 4; // -4 to 4, center is shamash
-                if (idx === 0) {
-                    // Shamash (center, taller)
-                    points.push({ x: centerX, y: shamashY, isShamash: true });
-                } else {
-                    const t = idx / 4;
-                    points.push({
-                        x: centerX + t * spread,
-                        y: topY,
-                        isShamash: false
-                    });
-                }
-            }
-            return { points, baseY, centerX, spread };
-        }
-
-        // Particle system for sparks
+        // ==================== PARTICLE SYSTEMS ====================
         const sparks = [];
+        const smoke = [];
+        const embers = [];
+
         class Spark {
             constructor(x, y, intensity) {
-                this.x = x;
-                this.y = y;
-                this.vx = (Math.random() - 0.5) * 2 * intensity;
-                this.vy = -Math.random() * 3 * intensity - 1;
+                this.x = x; this.y = y;
+                const angle = -Math.PI/2 + (Math.random() - 0.5) * 1.2;
+                const speed = (1 + Math.random() * 3) * intensity;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
                 this.life = 1;
-                this.decay = 0.01 + Math.random() * 0.03;
-                this.size = Math.random() * 2 + 0.5;
-                this.hue = 30 + Math.random() * 30;
+                this.decay = 0.015 + Math.random() * 0.025;
+                this.size = Math.random() * 2.5 + 0.5;
+                this.temp = 0.7 + Math.random() * 0.3;
             }
-            update() {
-                this.x += this.vx;
-                this.y += this.vy;
-                this.vy -= 0.02;
-                this.life -= this.decay;
-                this.size *= 0.99;
+            update(dt) {
+                this.x += this.vx * dt * 60;
+                this.y += this.vy * dt * 60;
+                this.vy -= 0.04 * dt * 60;
+                this.vx *= 0.99;
+                this.life -= this.decay * dt * 60;
+                this.size *= 1 - 0.01 * dt * 60;
             }
             draw() {
                 if (this.life <= 0) return;
+                const r = 255;
+                const g = Math.floor(120 + this.temp * 135);
+                const b = Math.floor(this.temp * 50);
                 ctx.save();
-                ctx.globalAlpha = this.life * 0.8;
-                ctx.fillStyle = `hsl(${this.hue}, 100%, ${60 + this.life * 30}%)`;
-                ctx.shadowColor = `hsl(${this.hue}, 100%, 70%)`;
-                ctx.shadowBlur = 6;
+                ctx.globalAlpha = this.life * 0.9;
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
+                ctx.shadowBlur = 8;
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
                 ctx.fill();
@@ -184,97 +411,227 @@
             }
         }
 
-        // Draw a single realistic flame
-        function drawFlame(x, y, size, audio, flameIndex, t) {
-            const { bass, mid, high, overall } = audio;
-            const flicker = Math.sin(t * 8 + flameIndex * 1.7) * 0.15 +
-                           Math.sin(t * 13 + flameIndex * 2.3) * 0.1 +
-                           Math.sin(t * 21 + flameIndex * 0.9) * 0.05;
+        class Smoke {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = -0.3 - Math.random() * 0.5;
+                this.life = 1;
+                this.decay = 0.004 + Math.random() * 0.006;
+                this.size = 3 + Math.random() * 5;
+                this.growRate = 0.15 + Math.random() * 0.1;
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotSpeed = (Math.random() - 0.5) * 0.02;
+            }
+            update(dt) {
+                const f = dt * 60;
+                this.x += this.vx * f + SimplexNoise.noise3D(this.x * 0.01, this.y * 0.01, time * 0.5) * 0.3;
+                this.y += this.vy * f;
+                this.life -= this.decay * f;
+                this.size += this.growRate * f;
+                this.rotation += this.rotSpeed * f;
+            }
+            draw() {
+                if (this.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.life * 0.06;
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, this.size);
+                grad.addColorStop(0, 'rgba(180,160,140,0.3)');
+                grad.addColorStop(0.5, 'rgba(120,110,100,0.15)');
+                grad.addColorStop(1, 'rgba(80,70,60,0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
 
-            const audioScale = 1 + overall * 1.8 + bass * 0.8;
-            const flickerScale = 1 + flicker;
+        class Ember {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.vx = (Math.random() - 0.5) * 0.8;
+                this.vy = -0.5 - Math.random() * 1.5;
+                this.life = 1;
+                this.decay = 0.003 + Math.random() * 0.005;
+                this.size = 1 + Math.random() * 1.5;
+                this.phase = Math.random() * Math.PI * 2;
+            }
+            update(dt) {
+                const f = dt * 60;
+                this.x += this.vx * f + Math.sin(time * 3 + this.phase) * 0.2;
+                this.y += this.vy * f;
+                this.vy -= 0.005 * f;
+                this.life -= this.decay * f;
+            }
+            draw() {
+                if (this.life <= 0) return;
+                const pulse = 0.6 + Math.sin(time * 8 + this.phase) * 0.4;
+                ctx.save();
+                ctx.globalAlpha = this.life * 0.8 * pulse;
+                ctx.fillStyle = `rgb(255, ${Math.floor(100 + this.life * 80)}, 20)`;
+                ctx.shadowColor = 'rgba(255,120,20,0.6)';
+                ctx.shadowBlur = 4;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function updateParticles(arr, dt) {
+            for (let i = arr.length - 1; i >= 0; i--) {
+                arr[i].update(dt);
+                if (arr[i].life <= 0) arr.splice(i, 1);
+            }
+        }
+
+        // ==================== MENORAH GEOMETRY ====================
+        function getMenorahPoints() {
+            const baseY = H * 0.88;
+            const centerX = W / 2;
+            const spread = Math.min(W * 0.36, H * 0.42);
+            const topY = H * 0.24;
+            const shamashY = H * 0.18;
+            const points = [];
+            for (let i = 0; i < 9; i++) {
+                const idx = i - 4;
+                if (idx === 0) {
+                    points.push({ x: centerX, y: shamashY, isShamash: true });
+                } else {
+                    points.push({ x: centerX + (idx / 4) * spread, y: topY, isShamash: false });
+                }
+            }
+            return { points, baseY, centerX, spread };
+        }
+
+        // ==================== HYPERREALISTIC FLAME ====================
+        function drawFlame(x, y, size, audio, idx, t) {
+            const { bass, mid, high, overall } = audio;
+
+            // Noise-driven turbulence
+            const n1 = SimplexNoise.noise3D(idx * 3.7, t * 2.5, 0);
+            const n2 = SimplexNoise.noise3D(idx * 2.1, t * 4.0, 10);
+            const n3 = SimplexNoise.noise3D(idx * 1.3, t * 6.0, 20);
+
+            const audioScale = 1 + overall * 2.2 + bass * 1.0;
+            const flickerScale = 1 + n1 * 0.18 + n2 * 0.08;
             const totalScale = audioScale * flickerScale;
 
-            const flameH = size * totalScale * 2.5;
-            const flameW = size * (0.6 + mid * 0.4);
+            const flameH = size * totalScale * 3.0;
+            const flameW = size * (0.55 + mid * 0.35 + n3 * 0.05);
+            const sway = n1 * 5 * (1 + high * 4) + n2 * 3;
 
-            const sway = Math.sin(t * 3 + flameIndex * 1.1) * 4 * (1 + high * 3) +
-                        Math.sin(t * 7 + flameIndex * 2.7) * 2;
+            // Volumetric glow (multiple layers)
+            for (let g = 3; g >= 0; g--) {
+                const glowR = flameH * (1.5 + g * 0.8);
+                const alpha = (0.02 + overall * 0.03) / (g + 1);
+                const gx = x + sway * 0.2;
+                const gy = y - flameH * 0.35;
+                const grd = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowR);
+                grd.addColorStop(0, `rgba(255, 150, 30, ${alpha * 2})`);
+                grd.addColorStop(0.3, `rgba(255, 80, 10, ${alpha})`);
+                grd.addColorStop(0.7, `rgba(200, 40, 0, ${alpha * 0.3})`);
+                grd.addColorStop(1, 'rgba(100, 20, 0, 0)');
+                ctx.fillStyle = grd;
+                ctx.fillRect(gx - glowR, gy - glowR, glowR * 2, glowR * 2);
+            }
 
-            // Outer glow
-            const glowRadius = flameH * 1.8;
-            const glow = ctx.createRadialGradient(x + sway * 0.3, y - flameH * 0.3, 0,
-                                                   x + sway * 0.3, y - flameH * 0.3, glowRadius);
-            glow.addColorStop(0, `rgba(255, 160, 30, ${0.15 + overall * 0.15})`);
-            glow.addColorStop(0.5, `rgba(255, 100, 10, ${0.05 + overall * 0.05})`);
-            glow.addColorStop(1, 'rgba(255, 60, 0, 0)');
-            ctx.fillStyle = glow;
-            ctx.fillRect(x - glowRadius, y - glowRadius * 1.5, glowRadius * 2, glowRadius * 2);
-
-            // Flame layers (outer to inner)
+            // Multi-layer flame body with noise-deformed bezier curves
             const layers = [
-                { color: [255, 60, 0], alpha: 0.4, wMul: 1.3, hMul: 1.1 },
-                { color: [255, 120, 0], alpha: 0.6, wMul: 1.0, hMul: 1.0 },
-                { color: [255, 180, 30], alpha: 0.8, wMul: 0.7, hMul: 0.85 },
-                { color: [255, 230, 100], alpha: 0.9, wMul: 0.4, hMul: 0.6 },
-                { color: [255, 255, 220], alpha: 1.0, wMul: 0.2, hMul: 0.3 }
+                { r: 180, g: 30,  b: 0,   alpha: 0.30, wM: 1.5,  hM: 1.15, blur: 25 },
+                { r: 220, g: 60,  b: 0,   alpha: 0.40, wM: 1.2,  hM: 1.05, blur: 18 },
+                { r: 255, g: 100, b: 0,   alpha: 0.55, wM: 1.0,  hM: 1.0,  blur: 12 },
+                { r: 255, g: 150, b: 20,  alpha: 0.65, wM: 0.75, hM: 0.88, blur: 8  },
+                { r: 255, g: 200, b: 60,  alpha: 0.80, wM: 0.50, hM: 0.70, blur: 5  },
+                { r: 255, g: 230, b: 120, alpha: 0.90, wM: 0.30, hM: 0.50, blur: 3  },
+                { r: 255, g: 250, b: 200, alpha: 0.95, wM: 0.15, hM: 0.28, blur: 2  },
+                { r: 255, g: 255, b: 240, alpha: 1.00, wM: 0.07, hM: 0.12, blur: 1  },
             ];
 
-            for (const layer of layers) {
-                const lw = flameW * layer.wMul;
-                const lh = flameH * layer.hMul;
-                const ls = sway * layer.wMul * 0.8;
+            for (const L of layers) {
+                const lw = flameW * L.wM;
+                const lh = flameH * L.hM;
+                const ls = sway * L.wM * 0.7;
+
+                // Noise deformation per layer
+                const dn1 = SimplexNoise.noise3D(idx * 5 + L.wM, t * 3, 5) * lw * 0.15;
+                const dn2 = SimplexNoise.noise3D(idx * 5 + L.wM, t * 3, 15) * lw * 0.15;
 
                 ctx.save();
-                ctx.globalAlpha = layer.alpha;
+                ctx.globalAlpha = L.alpha;
 
                 ctx.beginPath();
                 ctx.moveTo(x - lw, y);
 
-                // Left curve
+                // Left side with turbulence
                 ctx.bezierCurveTo(
-                    x - lw * 1.1, y - lh * 0.3,
-                    x + ls - lw * 0.3, y - lh * 0.7,
-                    x + ls * 1.2, y - lh
+                    x - lw * 1.15 + dn1, y - lh * 0.25,
+                    x + ls - lw * 0.35 + dn2, y - lh * 0.65,
+                    x + ls * 1.3, y - lh
                 );
-                // Right curve
+                // Right side
                 ctx.bezierCurveTo(
-                    x + ls + lw * 0.3, y - lh * 0.7,
-                    x + lw * 1.1, y - lh * 0.3,
+                    x + ls + lw * 0.35 - dn2, y - lh * 0.65,
+                    x + lw * 1.15 - dn1, y - lh * 0.25,
                     x + lw, y
                 );
 
-                const grad = ctx.createLinearGradient(x, y, x + ls, y - lh);
-                grad.addColorStop(0, `rgba(${layer.color.join(',')}, ${layer.alpha})`);
-                grad.addColorStop(0.6, `rgba(${layer.color.join(',')}, ${layer.alpha * 0.8})`);
-                grad.addColorStop(1, `rgba(${layer.color.join(',')}, 0)`);
+                const grad = ctx.createLinearGradient(x, y + 2, x + ls * 0.5, y - lh);
+                grad.addColorStop(0, `rgba(${L.r},${L.g},${L.b}, 1)`);
+                grad.addColorStop(0.3, `rgba(${L.r},${L.g},${L.b}, 0.9)`);
+                grad.addColorStop(0.7, `rgba(${L.r},${L.g},${L.b}, 0.5)`);
+                grad.addColorStop(1, `rgba(${L.r},${L.g},${L.b}, 0)`);
 
                 ctx.fillStyle = grad;
-                ctx.shadowColor = `rgba(${layer.color.join(',')}, 0.5)`;
-                ctx.shadowBlur = 15;
+                ctx.shadowColor = `rgba(${L.r},${L.g},${L.b}, 0.4)`;
+                ctx.shadowBlur = L.blur;
                 ctx.fill();
                 ctx.restore();
             }
 
-            // Spawn sparks on audio peaks
-            if (overall > 0.4 && Math.random() < overall * 0.5) {
-                sparks.push(new Spark(x + sway, y - flameH * 0.5, overall));
+            // Blue inner core at base (hottest part)
+            ctx.save();
+            ctx.globalAlpha = 0.3 + overall * 0.2;
+            const coreH = flameH * 0.08;
+            const coreW = flameW * 0.12;
+            const coreGrad = ctx.createRadialGradient(x, y - coreH, 0, x, y - coreH, coreW * 3);
+            coreGrad.addColorStop(0, 'rgba(180, 200, 255, 0.9)');
+            coreGrad.addColorStop(0.4, 'rgba(100, 140, 255, 0.4)');
+            coreGrad.addColorStop(1, 'rgba(100, 140, 255, 0)');
+            ctx.fillStyle = coreGrad;
+            ctx.beginPath();
+            ctx.ellipse(x, y - coreH, coreW * 3, coreH * 3, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // Sparks on audio peaks
+            if (overall > 0.25 && Math.random() < overall * 0.6) {
+                sparks.push(new Spark(x + sway, y - flameH * 0.4, overall));
+            }
+            // Smoke wisps
+            if (Math.random() < 0.08 + overall * 0.05) {
+                smoke.push(new Smoke(x + sway * 0.5, y - flameH * 0.9));
+            }
+            // Embers
+            if (Math.random() < 0.03 + overall * 0.04) {
+                embers.push(new Ember(x + sway * 0.3, y - flameH * 0.3));
             }
         }
 
-        // Draw menorah body
+        // ==================== MENORAH BODY ====================
         function drawMenorahBody(centerX, baseY, spread, audio) {
             const { overall, bass } = audio;
-            const goldBase = [212, 175, 55];
-            const goldHighlight = [255, 215, 0];
-            const intensity = 0.6 + overall * 0.4;
+            const intensity = 0.5 + overall * 0.5;
+            const topY = H * 0.24;
+            const shamashY = H * 0.18;
+            const branchWidth = 5 + bass * 3;
 
             ctx.save();
 
-            // Branch curves
-            const topY = H * 0.22;
-            const branchWidth = 4 + bass * 2;
-
+            // Draw branches with metallic gold gradient
             for (let side = -1; side <= 1; side += 2) {
                 for (let i = 1; i <= 4; i++) {
                     const t = (i / 4) * side;
@@ -283,101 +640,163 @@
                     ctx.beginPath();
                     ctx.moveTo(centerX, baseY - H * 0.06);
 
-                    const curveDepthX = centerX + t * spread * 0.4;
-                    const curveDepthY = baseY - H * 0.1;
-                    const midCurveY = topY + (baseY - topY) * 0.3;
+                    const curveX = centerX + t * spread * 0.35;
+                    const curveY = baseY - H * 0.12;
+                    const midY = topY + (baseY - topY) * 0.25;
 
-                    ctx.bezierCurveTo(
-                        curveDepthX, curveDepthY,
-                        endX, midCurveY,
+                    ctx.bezierCurveTo(curveX, curveY, endX, midY, endX, topY);
+
+                    const grad = ctx.createLinearGradient(
+                        centerX, baseY,
                         endX, topY
                     );
-
-                    const grad = ctx.createLinearGradient(centerX, baseY, endX, topY);
-                    grad.addColorStop(0, `rgba(${goldBase.join(',')}, ${intensity})`);
-                    grad.addColorStop(0.5, `rgba(${goldHighlight.join(',')}, ${intensity})`);
-                    grad.addColorStop(1, `rgba(${goldBase.join(',')}, ${intensity})`);
+                    // Metallic gold with light reflection
+                    grad.addColorStop(0, `rgba(160,130,40,${intensity})`);
+                    grad.addColorStop(0.2, `rgba(220,190,60,${intensity})`);
+                    grad.addColorStop(0.4, `rgba(255,230,100,${intensity * 1.1})`);
+                    grad.addColorStop(0.6, `rgba(210,175,50,${intensity})`);
+                    grad.addColorStop(0.8, `rgba(240,210,80,${intensity})`);
+                    grad.addColorStop(1, `rgba(200,165,45,${intensity})`);
 
                     ctx.strokeStyle = grad;
                     ctx.lineWidth = branchWidth;
                     ctx.lineCap = 'round';
-                    ctx.shadowColor = `rgba(255, 215, 0, ${0.3 + overall * 0.3})`;
-                    ctx.shadowBlur = 8 + overall * 8;
+                    ctx.shadowColor = `rgba(255,215,0,${0.2 + overall * 0.3})`;
+                    ctx.shadowBlur = 10 + overall * 10;
+                    ctx.stroke();
+
+                    // Metallic highlight line
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, baseY - H * 0.06);
+                    ctx.bezierCurveTo(curveX, curveY, endX, midY, endX, topY);
+                    ctx.strokeStyle = `rgba(255,245,180,${intensity * 0.3})`;
+                    ctx.lineWidth = branchWidth * 0.3;
                     ctx.stroke();
                 }
             }
 
-            // Center stem (shamash, taller)
-            const shamashY = H * 0.17;
+            // Shamash stem
             ctx.beginPath();
             ctx.moveTo(centerX, baseY - H * 0.06);
             ctx.lineTo(centerX, shamashY);
             const stemGrad = ctx.createLinearGradient(centerX, baseY, centerX, shamashY);
-            stemGrad.addColorStop(0, `rgba(${goldBase.join(',')}, ${intensity})`);
-            stemGrad.addColorStop(0.5, `rgba(${goldHighlight.join(',')}, ${intensity})`);
-            stemGrad.addColorStop(1, `rgba(${goldBase.join(',')}, ${intensity})`);
+            stemGrad.addColorStop(0, `rgba(180,150,50,${intensity})`);
+            stemGrad.addColorStop(0.3, `rgba(240,210,80,${intensity})`);
+            stemGrad.addColorStop(0.5, `rgba(255,235,120,${intensity * 1.1})`);
+            stemGrad.addColorStop(0.7, `rgba(230,195,65,${intensity})`);
+            stemGrad.addColorStop(1, `rgba(200,165,45,${intensity})`);
             ctx.strokeStyle = stemGrad;
-            ctx.lineWidth = branchWidth + 1;
+            ctx.lineWidth = branchWidth + 2;
             ctx.stroke();
 
-            // Candle holders (cups)
-            const holderPoints = getMenorahPoints().points;
-            for (const p of holderPoints) {
+            // Highlight on stem
+            ctx.beginPath();
+            ctx.moveTo(centerX, baseY - H * 0.06);
+            ctx.lineTo(centerX, shamashY);
+            ctx.strokeStyle = `rgba(255,250,200,${intensity * 0.25})`;
+            ctx.lineWidth = (branchWidth + 2) * 0.25;
+            ctx.stroke();
+
+            // Candle holders / cups with 3D look
+            const { points } = getMenorahPoints();
+            for (const p of points) {
+                // Cup shadow
                 ctx.beginPath();
-                ctx.ellipse(p.x, p.y + 4, 8, 4, 0, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${goldHighlight.join(',')}, ${intensity})`;
-                ctx.shadowColor = `rgba(255, 215, 0, ${0.4 + overall * 0.3})`;
-                ctx.shadowBlur = 6;
+                ctx.ellipse(p.x, p.y + 7, 10, 5, 0, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(100,80,20,${intensity * 0.5})`;
                 ctx.fill();
+
+                // Cup body
+                ctx.beginPath();
+                ctx.ellipse(p.x, p.y + 4, 9, 5, 0, 0, Math.PI);
+                ctx.fillStyle = `rgba(200,170,50,${intensity})`;
+                ctx.fill();
+
+                // Cup top rim
+                ctx.beginPath();
+                ctx.ellipse(p.x, p.y + 4, 9, 3, 0, 0, Math.PI * 2);
+                const rimGrad = ctx.createLinearGradient(p.x - 9, p.y, p.x + 9, p.y);
+                rimGrad.addColorStop(0, `rgba(190,160,45,${intensity})`);
+                rimGrad.addColorStop(0.5, `rgba(255,240,140,${intensity})`);
+                rimGrad.addColorStop(1, `rgba(190,160,45,${intensity})`);
+                ctx.fillStyle = rimGrad;
+                ctx.fill();
+
+                // Wax/candle stub
+                ctx.beginPath();
+                ctx.fillStyle = `rgba(245,235,210,${intensity * 0.8})`;
+                ctx.fillRect(p.x - 3, p.y - 4, 6, 8);
             }
 
-            // Base
+            // Base - more ornate
+            const baseW = 70;
+            const baseH = H * 0.04;
+
+            // Base shadow
             ctx.beginPath();
-            ctx.moveTo(centerX - 60, baseY);
-            ctx.lineTo(centerX + 60, baseY);
-            ctx.lineTo(centerX + 45, baseY - H * 0.03);
-            ctx.lineTo(centerX - 45, baseY - H * 0.03);
-            ctx.closePath();
-            const baseGrad = ctx.createLinearGradient(centerX - 60, baseY, centerX + 60, baseY);
-            baseGrad.addColorStop(0, `rgba(${goldBase.join(',')}, ${intensity * 0.8})`);
-            baseGrad.addColorStop(0.5, `rgba(${goldHighlight.join(',')}, ${intensity})`);
-            baseGrad.addColorStop(1, `rgba(${goldBase.join(',')}, ${intensity * 0.8})`);
-            ctx.fillStyle = baseGrad;
-            ctx.shadowColor = `rgba(255, 215, 0, 0.5)`;
-            ctx.shadowBlur = 15;
+            ctx.ellipse(centerX, baseY + 4, baseW + 5, 8, 0, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(0,0,0,${0.3 + overall * 0.2})`;
             ctx.fill();
 
-            // Base stem
+            // Base trapezoid
             ctx.beginPath();
-            ctx.moveTo(centerX - 8, baseY - H * 0.03);
-            ctx.lineTo(centerX + 8, baseY - H * 0.03);
-            ctx.lineTo(centerX + 6, baseY - H * 0.06);
-            ctx.lineTo(centerX - 6, baseY - H * 0.06);
+            ctx.moveTo(centerX - baseW, baseY);
+            ctx.lineTo(centerX + baseW, baseY);
+            ctx.lineTo(centerX + baseW * 0.7, baseY - baseH);
+            ctx.lineTo(centerX - baseW * 0.7, baseY - baseH);
             ctx.closePath();
-            ctx.fillStyle = `rgba(${goldHighlight.join(',')}, ${intensity})`;
+            const bGrad = ctx.createLinearGradient(centerX - baseW, baseY, centerX + baseW, baseY);
+            bGrad.addColorStop(0, `rgba(150,120,35,${intensity * 0.9})`);
+            bGrad.addColorStop(0.3, `rgba(230,200,70,${intensity})`);
+            bGrad.addColorStop(0.5, `rgba(255,235,120,${intensity})`);
+            bGrad.addColorStop(0.7, `rgba(230,200,70,${intensity})`);
+            bGrad.addColorStop(1, `rgba(150,120,35,${intensity * 0.9})`);
+            ctx.fillStyle = bGrad;
+            ctx.shadowColor = `rgba(255,215,0,${0.3})`;
+            ctx.shadowBlur = 12;
             ctx.fill();
 
-            // Decorative Star of David on base
-            drawStarOfDavid(centerX, baseY - H * 0.015, 12, intensity);
+            // Base connector
+            ctx.beginPath();
+            ctx.moveTo(centerX - 10, baseY - baseH);
+            ctx.lineTo(centerX + 10, baseY - baseH);
+            ctx.lineTo(centerX + 8, baseY - H * 0.06);
+            ctx.lineTo(centerX - 8, baseY - H * 0.06);
+            ctx.closePath();
+            const connGrad = ctx.createLinearGradient(centerX - 10, 0, centerX + 10, 0);
+            connGrad.addColorStop(0, `rgba(190,160,45,${intensity})`);
+            connGrad.addColorStop(0.5, `rgba(250,230,110,${intensity})`);
+            connGrad.addColorStop(1, `rgba(190,160,45,${intensity})`);
+            ctx.fillStyle = connGrad;
+            ctx.fill();
+
+            // Star of David
+            drawStarOfDavid(centerX, baseY - baseH * 0.5, 14, intensity);
+
+            // Decorative dots on base
+            for (let i = -3; i <= 3; i++) {
+                ctx.beginPath();
+                ctx.arc(centerX + i * 14, baseY - baseH * 0.5, 2, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,240,160,${intensity * 0.6})`;
+                ctx.fill();
+            }
 
             ctx.restore();
         }
 
         function drawStarOfDavid(cx, cy, size, alpha) {
             ctx.save();
-            ctx.strokeStyle = `rgba(255, 240, 180, ${alpha * 0.7})`;
+            ctx.strokeStyle = `rgba(255,240,180,${alpha * 0.7})`;
             ctx.lineWidth = 1.5;
-            ctx.shadowColor = `rgba(255, 215, 0, 0.4)`;
-            ctx.shadowBlur = 4;
-
+            ctx.shadowColor = `rgba(255,215,0,0.5)`;
+            ctx.shadowBlur = 6;
             for (let tri = 0; tri < 2; tri++) {
                 ctx.beginPath();
                 for (let i = 0; i < 3; i++) {
-                    const angle = (i * 120 + tri * 60 - 90) * Math.PI / 180;
-                    const px = cx + Math.cos(angle) * size;
-                    const py = cy + Math.sin(angle) * size;
-                    if (i === 0) ctx.moveTo(px, py);
-                    else ctx.lineTo(px, py);
+                    const a = (i * 120 + tri * 60 - 90) * Math.PI / 180;
+                    const px = cx + Math.cos(a) * size;
+                    const py = cy + Math.sin(a) * size;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
                 }
                 ctx.closePath();
                 ctx.stroke();
@@ -385,131 +804,243 @@
             ctx.restore();
         }
 
-        // Background with audio-reactive ambient lighting
+        // ==================== BACKGROUND ====================
         function drawBackground(audio, t) {
             const { overall, bass, mid, high } = audio;
 
-            // Deep dark gradient background
-            const bgGrad = ctx.createRadialGradient(W / 2, H * 0.3, 0, W / 2, H * 0.5, H);
-            bgGrad.addColorStop(0, `rgba(${30 + bass * 40}, ${10 + mid * 15}, ${5 + high * 10}, 1)`);
-            bgGrad.addColorStop(0.5, `rgba(${10 + bass * 15}, ${5 + mid * 5}, ${2}, 1)`);
-            bgGrad.addColorStop(1, `rgba(2, 1, 0, 1)`);
+            // Deep radial gradient
+            const bgGrad = ctx.createRadialGradient(W/2, H*0.35, 0, W/2, H*0.5, Math.max(W,H));
+            bgGrad.addColorStop(0, `rgba(${Math.floor(25+bass*50)}, ${Math.floor(8+mid*15)}, ${Math.floor(3+high*8)}, 1)`);
+            bgGrad.addColorStop(0.4, `rgba(${Math.floor(10+bass*20)}, ${Math.floor(4+mid*6)}, 2, 1)`);
+            bgGrad.addColorStop(1, 'rgba(1, 0, 0, 1)');
             ctx.fillStyle = bgGrad;
             ctx.fillRect(0, 0, W, H);
 
-            // Audio-reactive light rays from behind menorah
-            const rayCount = 12;
+            // Volumetric light rays behind menorah
             ctx.save();
-            ctx.globalAlpha = 0.03 + overall * 0.06;
+            const rayCount = 18;
             for (let i = 0; i < rayCount; i++) {
-                const angle = (i / rayCount) * Math.PI - Math.PI / 2 + Math.sin(t * 0.5 + i) * 0.05;
-                const rayLen = H * 0.8 * (0.8 + Math.sin(t * 2 + i * 1.3) * 0.2 + overall * 0.3);
+                const angle = (i / rayCount) * Math.PI * 1.2 - Math.PI * 0.6 - Math.PI / 2;
+                const wobble = SimplexNoise.noise2D(i * 0.5, t * 0.3) * 0.04;
+                const rayLen = H * (0.6 + Math.sin(t * 1.5 + i * 0.8) * 0.15 + overall * 0.3);
+                const rayAlpha = (0.015 + overall * 0.035) * (1 - Math.abs(i - rayCount/2) / rayCount);
 
+                ctx.globalAlpha = rayAlpha;
                 ctx.beginPath();
-                ctx.moveTo(W / 2, H * 0.4);
-                ctx.lineTo(
-                    W / 2 + Math.cos(angle - 0.03) * rayLen,
-                    H * 0.4 + Math.sin(angle - 0.03) * rayLen
-                );
-                ctx.lineTo(
-                    W / 2 + Math.cos(angle + 0.03) * rayLen,
-                    H * 0.4 + Math.sin(angle + 0.03) * rayLen
-                );
+                ctx.moveTo(W/2, H * 0.4);
+                const a1 = angle + wobble - 0.025;
+                const a2 = angle + wobble + 0.025;
+                ctx.lineTo(W/2 + Math.cos(a1) * rayLen, H*0.4 + Math.sin(a1) * rayLen);
+                ctx.lineTo(W/2 + Math.cos(a2) * rayLen, H*0.4 + Math.sin(a2) * rayLen);
                 ctx.closePath();
-                ctx.fillStyle = `rgba(255, 180, 50, 1)`;
+
+                const rayGrad = ctx.createLinearGradient(W/2, H*0.4,
+                    W/2 + Math.cos(angle + wobble) * rayLen,
+                    H*0.4 + Math.sin(angle + wobble) * rayLen);
+                rayGrad.addColorStop(0, 'rgba(255,180,50,1)');
+                rayGrad.addColorStop(0.5, 'rgba(255,120,20,0.5)');
+                rayGrad.addColorStop(1, 'rgba(255,60,0,0)');
+                ctx.fillStyle = rayGrad;
                 ctx.fill();
             }
             ctx.restore();
 
-            // Frequency visualization rings
+            // Frequency spectrum arcs
             if (audioReady) {
                 ctx.save();
-                ctx.globalAlpha = 0.04 + overall * 0.06;
-                const ringCount = 5;
-                for (let r = 0; r < ringCount; r++) {
-                    const radius = 50 + r * 60 + overall * 40;
-                    const hue = 25 + r * 8;
+                ctx.globalAlpha = 0.03 + overall * 0.04;
+                for (let r = 0; r < 4; r++) {
+                    const radius = 80 + r * 70 + overall * 50;
                     ctx.beginPath();
-                    ctx.arc(W / 2, H * 0.45, radius, 0, Math.PI * 2);
-                    ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${0.3 - r * 0.05})`;
-                    ctx.lineWidth = 1 + bass * 3;
+                    ctx.arc(W/2, H*0.45, radius, Math.PI * 1.1, Math.PI * 1.9);
+                    ctx.strokeStyle = `hsla(${20 + r * 10}, 100%, 55%, ${0.25 - r * 0.05})`;
+                    ctx.lineWidth = 1.5 + bass * 2;
                     ctx.stroke();
                 }
                 ctx.restore();
             }
+
+            // Subtle floor reflection
+            const reflGrad = ctx.createLinearGradient(0, H * 0.88, 0, H);
+            reflGrad.addColorStop(0, `rgba(80, 50, 10, ${0.05 + overall * 0.05})`);
+            reflGrad.addColorStop(0.3, `rgba(40, 25, 5, ${0.03 + overall * 0.03})`);
+            reflGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = reflGrad;
+            ctx.fillRect(0, H * 0.88, W, H * 0.12);
         }
 
-        // Waveform visualization at the bottom
-        function drawWaveform(audio, t) {
+        // ==================== WAVEFORM ====================
+        function drawWaveform(audio) {
             if (!audioReady) return;
-
             ctx.save();
-            ctx.globalAlpha = 0.2 + audio.overall * 0.3;
+            ctx.globalAlpha = 0.15 + audio.overall * 0.25;
+            const waveY = H * 0.94;
 
-            const waveY = H * 0.92;
+            // Filled waveform
             ctx.beginPath();
-            const sliceWidth = W / dataArray.length;
-
+            ctx.moveTo(0, waveY);
+            const step = W / dataArray.length;
             for (let i = 0; i < dataArray.length; i++) {
                 const v = dataArray[i] / 128.0;
-                const y = waveY + (v - 1) * 30 * (1 + audio.bass);
-                if (i === 0) ctx.moveTo(0, y);
-                else ctx.lineTo(i * sliceWidth, y);
+                const y = waveY + (v - 1) * 35 * (1 + audio.bass * 1.5);
+                ctx.lineTo(i * step, y);
             }
+            ctx.lineTo(W, waveY);
+            ctx.closePath();
+            const wGrad = ctx.createLinearGradient(0, waveY - 40, 0, waveY + 10);
+            wGrad.addColorStop(0, 'rgba(255,160,30,0.4)');
+            wGrad.addColorStop(1, 'rgba(255,80,10,0)');
+            ctx.fillStyle = wGrad;
+            ctx.fill();
 
-            const waveGrad = ctx.createLinearGradient(0, waveY - 30, 0, waveY + 30);
-            waveGrad.addColorStop(0, 'rgba(255, 180, 50, 0.8)');
-            waveGrad.addColorStop(0.5, 'rgba(255, 120, 20, 0.6)');
-            waveGrad.addColorStop(1, 'rgba(255, 60, 0, 0.3)');
-            ctx.strokeStyle = waveGrad;
-            ctx.lineWidth = 2;
-            ctx.shadowColor = 'rgba(255, 150, 30, 0.5)';
-            ctx.shadowBlur = 10;
+            // Waveform line
+            ctx.beginPath();
+            for (let i = 0; i < dataArray.length; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = waveY + (v - 1) * 35 * (1 + audio.bass * 1.5);
+                if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y);
+            }
+            ctx.strokeStyle = `rgba(255,180,50,${0.5 + audio.overall * 0.4})`;
+            ctx.lineWidth = 1.5;
+            ctx.shadowColor = 'rgba(255,150,30,0.5)';
+            ctx.shadowBlur = 8;
             ctx.stroke();
 
             ctx.restore();
         }
 
-        // Main render loop
-        function render() {
-            time += 0.016;
+        // ==================== HEAT DISTORTION ====================
+        function applyHeatDistortion(audio) {
+            if (audio.overall < 0.1) return;
+            const distortionStrength = audio.overall * 3;
+            const region = {
+                x: Math.floor((W / 2 - W * 0.3) * DPR),
+                y: Math.floor(H * 0.05 * DPR),
+                w: Math.floor(W * 0.6 * DPR),
+                h: Math.floor(H * 0.25 * DPR)
+            };
+
+            if (region.w <= 0 || region.h <= 0) return;
+
+            try {
+                const imgData = ctx.getImageData(region.x, region.y, region.w, region.h);
+                const data = imgData.data;
+                const copy = new Uint8ClampedArray(data);
+                const w = region.w;
+
+                for (let py = 2; py < region.h - 2; py++) {
+                    for (let px = 2; px < w - 2; px++) {
+                        const nx = SimplexNoise.noise3D(px * 0.02, py * 0.02, time * 2) * distortionStrength;
+                        const ny = SimplexNoise.noise3D(px * 0.02 + 100, py * 0.02, time * 2) * distortionStrength;
+
+                        const sx = Math.min(Math.max(Math.floor(px + nx), 0), w - 1);
+                        const sy = Math.min(Math.max(Math.floor(py + ny), 0), region.h - 1);
+
+                        const di = (py * w + px) * 4;
+                        const si = (sy * w + sx) * 4;
+                        data[di] = copy[si];
+                        data[di+1] = copy[si+1];
+                        data[di+2] = copy[si+2];
+                    }
+                }
+                ctx.putImageData(imgData, region.x, region.y);
+            } catch(e) {
+                // Silently ignore if getImageData fails
+            }
+        }
+
+        // ==================== RENDER LOOP ====================
+        function render(now) {
+            const dt = Math.min((now - lastTime) / 1000, 0.05);
+            lastTime = now;
+            time += dt;
+
             const audio = getAudioLevel();
             const { points, baseY, centerX, spread } = getMenorahPoints();
 
-            // Clear with slight trail for glow persistence
             ctx.globalCompositeOperation = 'source-over';
             drawBackground(audio, time);
-
-            // Draw menorah body
             drawMenorahBody(centerX, baseY, spread, audio);
 
-            // Draw flames on each branch
+            // Flames with additive blending
             ctx.globalCompositeOperation = 'lighter';
-            const flameSize = Math.min(W, H) * 0.025;
-            points.forEach((p, i) => {
-                const sz = p.isShamash ? flameSize * 1.4 : flameSize;
+            const flameSize = Math.min(W, H) * 0.022;
+            for (let i = 0; i < points.length; i++) {
+                const p = points[i];
+                const sz = p.isShamash ? flameSize * 1.5 : flameSize;
                 drawFlame(p.x, p.y, sz, audio, i, time);
-            });
-
-            // Update and draw sparks
-            for (let i = sparks.length - 1; i >= 0; i--) {
-                sparks[i].update();
-                sparks[i].draw();
-                if (sparks[i].life <= 0) sparks.splice(i, 1);
             }
 
+            // Particles
+            ctx.globalCompositeOperation = 'lighter';
+            for (const s of sparks) s.draw();
+            for (const e of embers) e.draw();
             ctx.globalCompositeOperation = 'source-over';
-            drawWaveform(audio, time);
+            for (const s of smoke) s.draw();
+
+            updateParticles(sparks, dt);
+            updateParticles(smoke, dt);
+            updateParticles(embers, dt);
+
+            // Clamp particle counts
+            while (sparks.length > 300) sparks.shift();
+            while (smoke.length > 80) smoke.shift();
+            while (embers.length > 100) embers.shift();
+
+            drawWaveform(audio);
+
+            // Heat distortion (apply sparingly for performance)
+            if (Math.random() < 0.3) applyHeatDistortion(audio);
 
             requestAnimationFrame(render);
         }
 
-        // Start on click
-        overlay.addEventListener('click', async () => {
+        // ==================== SOURCE SELECTION ====================
+        function start() {
             overlay.classList.add('hidden');
-            await initAudio();
-            render();
+            requestAnimationFrame(render);
+        }
+
+        document.getElementById('btnMic').addEventListener('click', async () => {
+            await initMicrophone();
+            start();
         });
+
+        document.getElementById('btnSystem').addEventListener('click', async () => {
+            await initSystemAudio();
+            start();
+        });
+
+        document.getElementById('btnYoutube').addEventListener('click', () => {
+            document.getElementById('youtubeInput').classList.toggle('visible');
+        });
+
+        document.getElementById('ytGo').addEventListener('click', async () => {
+            const url = document.getElementById('ytUrl').value.trim();
+            if (!url) return;
+            if (initYouTube(url)) {
+                // Also try to capture system audio for the YouTube playback
+                try {
+                    createAnalyser();
+                    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                    stream.getVideoTracks().forEach(t => t.stop());
+                    const audioTracks = stream.getAudioTracks();
+                    if (audioTracks.length > 0) {
+                        audioCtx.createMediaStreamSource(new MediaStream(audioTracks)).connect(analyser);
+                        audioReady = true;
+                        setSourceLabel('YouTube + System Audio Capture');
+                    }
+                } catch (e) {
+                    setSourceLabel('YouTube (visual only - select tab audio to react)');
+                }
+                start();
+            }
+        });
+
+        document.getElementById('ytUrl').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('ytGo').click();
+        });
+
     })();
     </script>
 </body>
