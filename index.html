@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menorah Flame Sound Visualizer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Georgia', serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #startOverlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: radial-gradient(ellipse at center, #1a0a00 0%, #000 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            cursor: pointer;
+            transition: opacity 0.8s ease;
+        }
+        #startOverlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #startOverlay h1 {
+            color: #f4c430;
+            font-size: 3rem;
+            text-shadow: 0 0 30px rgba(244, 196, 48, 0.6), 0 0 60px rgba(244, 196, 48, 0.3);
+            margin-bottom: 1rem;
+            letter-spacing: 0.1em;
+        }
+        #startOverlay p {
+            color: #c49430;
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div id="startOverlay">
+        <h1>Menorah Flame Visualizer</h1>
+        <p>Click anywhere to begin</p>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script>
+    (function() {
+        'use strict';
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('startOverlay');
+
+        let W, H;
+        let audioCtx, analyser, dataArray, freqData;
+        let audioReady = false;
+        let time = 0;
+        const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+        function resize() {
+            W = window.innerWidth;
+            H = window.innerHeight;
+            canvas.width = W * DPR;
+            canvas.height = H * DPR;
+            ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Audio setup
+        async function initAudio() {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.8;
+                const bufLen = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufLen);
+                freqData = new Uint8Array(bufLen);
+
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                source.connect(analyser);
+                audioReady = true;
+            } catch (e) {
+                console.warn('Audio not available, running in ambient mode.', e);
+                audioReady = false;
+            }
+        }
+
+        function getAudioLevel() {
+            if (!audioReady) return { bass: 0.3, mid: 0.3, high: 0.3, overall: 0.3 };
+            analyser.getByteFrequencyData(freqData);
+            analyser.getByteTimeDomainData(dataArray);
+
+            const len = freqData.length;
+            let bass = 0, mid = 0, high = 0;
+            const bassEnd = Math.floor(len * 0.15);
+            const midEnd = Math.floor(len * 0.5);
+
+            for (let i = 0; i < bassEnd; i++) bass += freqData[i];
+            for (let i = bassEnd; i < midEnd; i++) mid += freqData[i];
+            for (let i = midEnd; i < len; i++) high += freqData[i];
+
+            bass = bass / (bassEnd * 255);
+            mid = mid / ((midEnd - bassEnd) * 255);
+            high = high / ((len - midEnd) * 255);
+            const overall = (bass * 0.5 + mid * 0.3 + high * 0.2);
+
+            return { bass, mid, high, overall };
+        }
+
+        // Menorah geometry
+        const BRANCHES = 9;
+
+        function getMenorahPoints() {
+            const baseY = H * 0.88;
+            const centerX = W / 2;
+            const spread = Math.min(W * 0.38, H * 0.45);
+            const topY = H * 0.22;
+            const shamashY = H * 0.17;
+
+            const points = [];
+            for (let i = 0; i < BRANCHES; i++) {
+                const idx = i - 4; // -4 to 4, center is shamash
+                if (idx === 0) {
+                    // Shamash (center, taller)
+                    points.push({ x: centerX, y: shamashY, isShamash: true });
+                } else {
+                    const t = idx / 4;
+                    points.push({
+                        x: centerX + t * spread,
+                        y: topY,
+                        isShamash: false
+                    });
+                }
+            }
+            return { points, baseY, centerX, spread };
+        }
+
+        // Particle system for sparks
+        const sparks = [];
+        class Spark {
+            constructor(x, y, intensity) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 2 * intensity;
+                this.vy = -Math.random() * 3 * intensity - 1;
+                this.life = 1;
+                this.decay = 0.01 + Math.random() * 0.03;
+                this.size = Math.random() * 2 + 0.5;
+                this.hue = 30 + Math.random() * 30;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy -= 0.02;
+                this.life -= this.decay;
+                this.size *= 0.99;
+            }
+            draw() {
+                if (this.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.life * 0.8;
+                ctx.fillStyle = `hsl(${this.hue}, 100%, ${60 + this.life * 30}%)`;
+                ctx.shadowColor = `hsl(${this.hue}, 100%, 70%)`;
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // Draw a single realistic flame
+        function drawFlame(x, y, size, audio, flameIndex, t) {
+            const { bass, mid, high, overall } = audio;
+            const flicker = Math.sin(t * 8 + flameIndex * 1.7) * 0.15 +
+                           Math.sin(t * 13 + flameIndex * 2.3) * 0.1 +
+                           Math.sin(t * 21 + flameIndex * 0.9) * 0.05;
+
+            const audioScale = 1 + overall * 1.8 + bass * 0.8;
+            const flickerScale = 1 + flicker;
+            const totalScale = audioScale * flickerScale;
+
+            const flameH = size * totalScale * 2.5;
+            const flameW = size * (0.6 + mid * 0.4);
+
+            const sway = Math.sin(t * 3 + flameIndex * 1.1) * 4 * (1 + high * 3) +
+                        Math.sin(t * 7 + flameIndex * 2.7) * 2;
+
+            // Outer glow
+            const glowRadius = flameH * 1.8;
+            const glow = ctx.createRadialGradient(x + sway * 0.3, y - flameH * 0.3, 0,
+                                                   x + sway * 0.3, y - flameH * 0.3, glowRadius);
+            glow.addColorStop(0, `rgba(255, 160, 30, ${0.15 + overall * 0.15})`);
+            glow.addColorStop(0.5, `rgba(255, 100, 10, ${0.05 + overall * 0.05})`);
+            glow.addColorStop(1, 'rgba(255, 60, 0, 0)');
+            ctx.fillStyle = glow;
+            ctx.fillRect(x - glowRadius, y - glowRadius * 1.5, glowRadius * 2, glowRadius * 2);
+
+            // Flame layers (outer to inner)
+            const layers = [
+                { color: [255, 60, 0], alpha: 0.4, wMul: 1.3, hMul: 1.1 },
+                { color: [255, 120, 0], alpha: 0.6, wMul: 1.0, hMul: 1.0 },
+                { color: [255, 180, 30], alpha: 0.8, wMul: 0.7, hMul: 0.85 },
+                { color: [255, 230, 100], alpha: 0.9, wMul: 0.4, hMul: 0.6 },
+                { color: [255, 255, 220], alpha: 1.0, wMul: 0.2, hMul: 0.3 }
+            ];
+
+            for (const layer of layers) {
+                const lw = flameW * layer.wMul;
+                const lh = flameH * layer.hMul;
+                const ls = sway * layer.wMul * 0.8;
+
+                ctx.save();
+                ctx.globalAlpha = layer.alpha;
+
+                ctx.beginPath();
+                ctx.moveTo(x - lw, y);
+
+                // Left curve
+                ctx.bezierCurveTo(
+                    x - lw * 1.1, y - lh * 0.3,
+                    x + ls - lw * 0.3, y - lh * 0.7,
+                    x + ls * 1.2, y - lh
+                );
+                // Right curve
+                ctx.bezierCurveTo(
+                    x + ls + lw * 0.3, y - lh * 0.7,
+                    x + lw * 1.1, y - lh * 0.3,
+                    x + lw, y
+                );
+
+                const grad = ctx.createLinearGradient(x, y, x + ls, y - lh);
+                grad.addColorStop(0, `rgba(${layer.color.join(',')}, ${layer.alpha})`);
+                grad.addColorStop(0.6, `rgba(${layer.color.join(',')}, ${layer.alpha * 0.8})`);
+                grad.addColorStop(1, `rgba(${layer.color.join(',')}, 0)`);
+
+                ctx.fillStyle = grad;
+                ctx.shadowColor = `rgba(${layer.color.join(',')}, 0.5)`;
+                ctx.shadowBlur = 15;
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Spawn sparks on audio peaks
+            if (overall > 0.4 && Math.random() < overall * 0.5) {
+                sparks.push(new Spark(x + sway, y - flameH * 0.5, overall));
+            }
+        }
+
+        // Draw menorah body
+        function drawMenorahBody(centerX, baseY, spread, audio) {
+            const { overall, bass } = audio;
+            const goldBase = [212, 175, 55];
+            const goldHighlight = [255, 215, 0];
+            const intensity = 0.6 + overall * 0.4;
+
+            ctx.save();
+
+            // Branch curves
+            const topY = H * 0.22;
+            const branchWidth = 4 + bass * 2;
+
+            for (let side = -1; side <= 1; side += 2) {
+                for (let i = 1; i <= 4; i++) {
+                    const t = (i / 4) * side;
+                    const endX = centerX + t * spread;
+
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, baseY - H * 0.06);
+
+                    const curveDepthX = centerX + t * spread * 0.4;
+                    const curveDepthY = baseY - H * 0.1;
+                    const midCurveY = topY + (baseY - topY) * 0.3;
+
+                    ctx.bezierCurveTo(
+                        curveDepthX, curveDepthY,
+                        endX, midCurveY,
+                        endX, topY
+                    );
+
+                    const grad = ctx.createLinearGradient(centerX, baseY, endX, topY);
+                    grad.addColorStop(0, `rgba(${goldBase.join(',')}, ${intensity})`);
+                    grad.addColorStop(0.5, `rgba(${goldHighlight.join(',')}, ${intensity})`);
+                    grad.addColorStop(1, `rgba(${goldBase.join(',')}, ${intensity})`);
+
+                    ctx.strokeStyle = grad;
+                    ctx.lineWidth = branchWidth;
+                    ctx.lineCap = 'round';
+                    ctx.shadowColor = `rgba(255, 215, 0, ${0.3 + overall * 0.3})`;
+                    ctx.shadowBlur = 8 + overall * 8;
+                    ctx.stroke();
+                }
+            }
+
+            // Center stem (shamash, taller)
+            const shamashY = H * 0.17;
+            ctx.beginPath();
+            ctx.moveTo(centerX, baseY - H * 0.06);
+            ctx.lineTo(centerX, shamashY);
+            const stemGrad = ctx.createLinearGradient(centerX, baseY, centerX, shamashY);
+            stemGrad.addColorStop(0, `rgba(${goldBase.join(',')}, ${intensity})`);
+            stemGrad.addColorStop(0.5, `rgba(${goldHighlight.join(',')}, ${intensity})`);
+            stemGrad.addColorStop(1, `rgba(${goldBase.join(',')}, ${intensity})`);
+            ctx.strokeStyle = stemGrad;
+            ctx.lineWidth = branchWidth + 1;
+            ctx.stroke();
+
+            // Candle holders (cups)
+            const holderPoints = getMenorahPoints().points;
+            for (const p of holderPoints) {
+                ctx.beginPath();
+                ctx.ellipse(p.x, p.y + 4, 8, 4, 0, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${goldHighlight.join(',')}, ${intensity})`;
+                ctx.shadowColor = `rgba(255, 215, 0, ${0.4 + overall * 0.3})`;
+                ctx.shadowBlur = 6;
+                ctx.fill();
+            }
+
+            // Base
+            ctx.beginPath();
+            ctx.moveTo(centerX - 60, baseY);
+            ctx.lineTo(centerX + 60, baseY);
+            ctx.lineTo(centerX + 45, baseY - H * 0.03);
+            ctx.lineTo(centerX - 45, baseY - H * 0.03);
+            ctx.closePath();
+            const baseGrad = ctx.createLinearGradient(centerX - 60, baseY, centerX + 60, baseY);
+            baseGrad.addColorStop(0, `rgba(${goldBase.join(',')}, ${intensity * 0.8})`);
+            baseGrad.addColorStop(0.5, `rgba(${goldHighlight.join(',')}, ${intensity})`);
+            baseGrad.addColorStop(1, `rgba(${goldBase.join(',')}, ${intensity * 0.8})`);
+            ctx.fillStyle = baseGrad;
+            ctx.shadowColor = `rgba(255, 215, 0, 0.5)`;
+            ctx.shadowBlur = 15;
+            ctx.fill();
+
+            // Base stem
+            ctx.beginPath();
+            ctx.moveTo(centerX - 8, baseY - H * 0.03);
+            ctx.lineTo(centerX + 8, baseY - H * 0.03);
+            ctx.lineTo(centerX + 6, baseY - H * 0.06);
+            ctx.lineTo(centerX - 6, baseY - H * 0.06);
+            ctx.closePath();
+            ctx.fillStyle = `rgba(${goldHighlight.join(',')}, ${intensity})`;
+            ctx.fill();
+
+            // Decorative Star of David on base
+            drawStarOfDavid(centerX, baseY - H * 0.015, 12, intensity);
+
+            ctx.restore();
+        }
+
+        function drawStarOfDavid(cx, cy, size, alpha) {
+            ctx.save();
+            ctx.strokeStyle = `rgba(255, 240, 180, ${alpha * 0.7})`;
+            ctx.lineWidth = 1.5;
+            ctx.shadowColor = `rgba(255, 215, 0, 0.4)`;
+            ctx.shadowBlur = 4;
+
+            for (let tri = 0; tri < 2; tri++) {
+                ctx.beginPath();
+                for (let i = 0; i < 3; i++) {
+                    const angle = (i * 120 + tri * 60 - 90) * Math.PI / 180;
+                    const px = cx + Math.cos(angle) * size;
+                    const py = cy + Math.sin(angle) * size;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // Background with audio-reactive ambient lighting
+        function drawBackground(audio, t) {
+            const { overall, bass, mid, high } = audio;
+
+            // Deep dark gradient background
+            const bgGrad = ctx.createRadialGradient(W / 2, H * 0.3, 0, W / 2, H * 0.5, H);
+            bgGrad.addColorStop(0, `rgba(${30 + bass * 40}, ${10 + mid * 15}, ${5 + high * 10}, 1)`);
+            bgGrad.addColorStop(0.5, `rgba(${10 + bass * 15}, ${5 + mid * 5}, ${2}, 1)`);
+            bgGrad.addColorStop(1, `rgba(2, 1, 0, 1)`);
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, W, H);
+
+            // Audio-reactive light rays from behind menorah
+            const rayCount = 12;
+            ctx.save();
+            ctx.globalAlpha = 0.03 + overall * 0.06;
+            for (let i = 0; i < rayCount; i++) {
+                const angle = (i / rayCount) * Math.PI - Math.PI / 2 + Math.sin(t * 0.5 + i) * 0.05;
+                const rayLen = H * 0.8 * (0.8 + Math.sin(t * 2 + i * 1.3) * 0.2 + overall * 0.3);
+
+                ctx.beginPath();
+                ctx.moveTo(W / 2, H * 0.4);
+                ctx.lineTo(
+                    W / 2 + Math.cos(angle - 0.03) * rayLen,
+                    H * 0.4 + Math.sin(angle - 0.03) * rayLen
+                );
+                ctx.lineTo(
+                    W / 2 + Math.cos(angle + 0.03) * rayLen,
+                    H * 0.4 + Math.sin(angle + 0.03) * rayLen
+                );
+                ctx.closePath();
+                ctx.fillStyle = `rgba(255, 180, 50, 1)`;
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // Frequency visualization rings
+            if (audioReady) {
+                ctx.save();
+                ctx.globalAlpha = 0.04 + overall * 0.06;
+                const ringCount = 5;
+                for (let r = 0; r < ringCount; r++) {
+                    const radius = 50 + r * 60 + overall * 40;
+                    const hue = 25 + r * 8;
+                    ctx.beginPath();
+                    ctx.arc(W / 2, H * 0.45, radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${0.3 - r * 0.05})`;
+                    ctx.lineWidth = 1 + bass * 3;
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        }
+
+        // Waveform visualization at the bottom
+        function drawWaveform(audio, t) {
+            if (!audioReady) return;
+
+            ctx.save();
+            ctx.globalAlpha = 0.2 + audio.overall * 0.3;
+
+            const waveY = H * 0.92;
+            ctx.beginPath();
+            const sliceWidth = W / dataArray.length;
+
+            for (let i = 0; i < dataArray.length; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = waveY + (v - 1) * 30 * (1 + audio.bass);
+                if (i === 0) ctx.moveTo(0, y);
+                else ctx.lineTo(i * sliceWidth, y);
+            }
+
+            const waveGrad = ctx.createLinearGradient(0, waveY - 30, 0, waveY + 30);
+            waveGrad.addColorStop(0, 'rgba(255, 180, 50, 0.8)');
+            waveGrad.addColorStop(0.5, 'rgba(255, 120, 20, 0.6)');
+            waveGrad.addColorStop(1, 'rgba(255, 60, 0, 0.3)');
+            ctx.strokeStyle = waveGrad;
+            ctx.lineWidth = 2;
+            ctx.shadowColor = 'rgba(255, 150, 30, 0.5)';
+            ctx.shadowBlur = 10;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        // Main render loop
+        function render() {
+            time += 0.016;
+            const audio = getAudioLevel();
+            const { points, baseY, centerX, spread } = getMenorahPoints();
+
+            // Clear with slight trail for glow persistence
+            ctx.globalCompositeOperation = 'source-over';
+            drawBackground(audio, time);
+
+            // Draw menorah body
+            drawMenorahBody(centerX, baseY, spread, audio);
+
+            // Draw flames on each branch
+            ctx.globalCompositeOperation = 'lighter';
+            const flameSize = Math.min(W, H) * 0.025;
+            points.forEach((p, i) => {
+                const sz = p.isShamash ? flameSize * 1.4 : flameSize;
+                drawFlame(p.x, p.y, sz, audio, i, time);
+            });
+
+            // Update and draw sparks
+            for (let i = sparks.length - 1; i >= 0; i--) {
+                sparks[i].update();
+                sparks[i].draw();
+                if (sparks[i].life <= 0) sparks.splice(i, 1);
+            }
+
+            ctx.globalCompositeOperation = 'source-over';
+            drawWaveform(audio, time);
+
+            requestAnimationFrame(render);
+        }
+
+        // Start on click
+        overlay.addEventListener('click', async () => {
+            overlay.classList.add('hidden');
+            await initAudio();
+            render();
+        });
+    })();
+    </script>
+</body>
+</html>
